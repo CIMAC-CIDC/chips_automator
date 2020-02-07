@@ -1,0 +1,60 @@
+###############################################################################
+# Automator configuration file
+###############################################################################
+
+# Give the new instance a unique name, e.g. the chips run name
+# NOTE: "chips-auto" will automatically be prepended to this string
+instance_name: "test1"
+
+# Define the number of cores for the chips instance
+# Options- 32 (default), 64, 96 
+cores: 32
+
+# Define the disk size to use in GB, default 500
+# the name of the persistent disk will be: "chips_auto_{instance_name}_disk"
+disk_size: 500
+
+#DEFINE the path to TRANSFER the files AFTER the chips run is complete
+google_bucket_path: gs://mybucket/
+
+# Uncomment the following and define the specific chips commit string to use
+# chips_commit: 44b17ff
+# chips_commit: develop
+
+# DEFINE the samples- each sample should have a name, e.g. SAMPLE1
+# and a Google bucket path to the input file, 
+# e.g. gs://mybucket/data/sample1.fastq.gz
+# VALID INPUTS: fastq, fastq.gz
+# NOTE: for PAIRED-END fastq/fastq.gz, give both pairs to the sample:
+# SAMPLE_1_PE:
+#   - gs://mybucket/data/sample1_pair1.fastq
+#   - gs://mybucket/data/sample1_pair2.fastq
+samples:
+  mocha2-Run1-pt1-Normal:
+    - gs://mybucket/data/R1-1-N_HHTFLDSXX_R1.fastq.gz
+    - gs://mybucket/data/R1-1-N_HHTFLDSXX_R2.fastq.gz
+  mocha2-Run1-pt1-FF-Tumor:
+    - gs://mybucket/data/R1-1-F_HHTFLDSXX_R1.fastq.gz
+    - gs://mybucket/data/R1-1-F_HHTFLDSXX_R2.fastq.gz
+  mocha2-Run1-pt1-FFPE-Tumor:
+    - gs://mybucket/data/R1-1-FP_HHTFLDSXX_R1.fastq.gz
+    - gs://mybucket/data/R1-1-FP_HHTFLDSXX_R2.fastq.gz
+
+# metahseet- Group the samples into Treatment/Control "runs"
+# each run should have a name, e.g. run_1:
+# then under each run, define a Treatment and a Control sample
+# EXAMPLE:
+# metasheet:
+#  run_1:
+#    treat: SAMPLE_Tumor
+#    cont: SAMPLE_normal
+metasheet:
+  mocha2-Run1-pt1-FF_run:
+    treat: mocha2-Run1-pt1-Normal
+    cont: mocha2-Run1-pt1-FF-Tumor
+  mocha2-Run1-pt1-FFPE_run:
+    treart: mocha2-Run1-pt1-Normal
+    cont: mocha2-Run1-pt1-FFPE-Tumor
+
+
+

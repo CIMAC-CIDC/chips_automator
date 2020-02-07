@@ -1,0 +1,30 @@
+name: chips_automator
+channels:
+- bioconda
+- conda-forge
+- defaults
+dependencies:
+- libdeflate=1.0
+- samtools=1.9
+- ca-certificates=2018.10.15
+- certifi=2018.10.15
+- google-cloud-sdk=239.0.0
+- ncurses=6.1
+- openssl=1.0.2p
+- pip=18.1
+- python=2.7.15
+- readline=7.0
+- setuptools=40.6.2
+- sqlite=3.25.3
+- tk=8.6.9
+- wheel=0.32.2
+- zlib=1.2.11
+- bzip2=1.0.6
+- curl=7.61.1
+- libcurl=7.61.1
+- libssh2=1.8.0
+- xz=5.2.4
+- paramiko
+- ruamel.yaml
+- pip:
+  - google-api-python-client
