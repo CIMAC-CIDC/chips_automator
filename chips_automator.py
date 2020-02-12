@@ -208,7 +208,7 @@ def main():
     checkConfig(config)
 
     #SET DEFAULTS
-    _commit_str = "" if not "chips_commit" in config else config['wes_commit']
+    _commit_str = "" if not "chips_commit" in config else config['chips_commit']
     _image = "chips" if not "image" in config else config['image']
     _project = "cidc-biofx" if not "project" in config else config['project']
     _service_account = "biofxvm@cidc-biofx.iam.gserviceaccount.com"
