@@ -1,0 +1,88 @@
+###############################################################################
+# Automator configuration file
+###############################################################################
+#trim_soft_clip: False
+#genes_to_plot: GAPDH ACTB TP53
+#upstream: 50000
+#downstream: 50000
+
+#trim_adapter: true
+
+# Give the new instance a unique name, e.g. the chips run name
+# NOTE: "chips-auto" will automatically be prepended to this string
+instance_name: 'chips-auto-fast-test'
+
+# Define the number of cores for the chips instance
+# Options- 32 (default), 64, 96
+cores: 32
+
+# Define the disk size to use in GB, default 500
+# the name of the persistent disk will be: "chips_auto_{instance_name}_disk"
+disk_size: 200
+
+#DEFINE the path to TRANSFER the files AFTER the chips run is complete
+google_bucket_path: gs://lens_bucket2/chips_automator/raw_data/test_set1/Results/
+
+# Uncomment the following and define the specific chips commit string to use
+# chips_commit: 44b17ff
+# chips_commit: develop
+
+#Define the chips reference snapshot to use, default chips-ref-ver1-0
+chips_ref_snapshot: 'chips-ref-ver1-0'
+
+#Uncomment the following and define the specific chips GCP image to use
+#NOTE: IF a specific GCP image is not set via config['image'], then
+#the default behavior is to get the latest chips image
+image: 'chips-ver1-7c'
+
+#ALIGNER: if you have sentieon license and got sentieon installed on your machine
+#Uncomment the following line and set absolute path of sentieon
+#This software could speed up your alignment
+sentieon: "/home/taing/sentieon/sentieon-genomics-201808.05/bin/sentieon"
+
+#genome trackview parameters
+genes_to_plot: 'GAPDH ACTB TP53 IL7R CCR7 S100A4 CD8A CD14 MS4A1 GNLY'
+upstream: 50000
+downstream: 50000
+
+# DEFINE the samples- each sample should have a name, e.g. SAMPLE1
+# and a Google bucket path to the input file,
+# e.g. gs://mybucket/data/sample1.fastq.gz
+# VALID INPUTS: fastq, fastq.gz
+# NOTE: for PAIRED-END fastq/fastq.gz, give both pairs to the sample:
+# SAMPLE_1_PE:
+#   - gs://mybucket/data/sample1_pair1.fastq
+#   - gs://mybucket/data/sample1_pair2.fastq
+samples:
+  wz2116:
+    - gs://lens_bucket2/chips_automator/raw_data/test_set1/4433_2_wz2116_TGAAGAGA_S63_L007_R1_001.1mil.fastq.gz
+  wz2130:
+    - gs://lens_bucket2/chips_automator/raw_data/test_set1/4455_6_wz2130_ACAGCAGA_S35_L002_R1_001.1mil.fastq.gz
+  wz2163:
+    - gs://lens_bucket2/chips_automator/raw_data/test_set1/4455_39_wz2163_GGAGAACA_S68_L005_R1_001.1mil.fastq.gz
+
+
+# metahseet- Group the samples into Treatment/Control "runs"
+# each run should have a name, e.g. run_1:
+# then under each run, define a Treatment and a Control sample
+# EXAMPLE:
+# metasheet:
+#  run_1:
+#    treat: SAMPLE_Tumor
+#    cont: SAMPLE_normal
+metasheet:
+  wz2116:
+    treat1: 'wz2116'
+    cont1:
+    treat2:
+    cont2:
+  wz2130:
+    treat1: 'wz2130'
+    cont1:
+    treat2:
+    cont2:
+  wz2163:
+    treat1: 'wz2163'
+    cont1:
+    treat2:
+    cont2:

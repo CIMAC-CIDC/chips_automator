@@ -1,3 +1,7 @@
+"""Len Taing 2019 (TGBTG)
+CHIPS automator - Google Cloud API wrapper for disk operations
+"""
+
 import os
 import sys
 import time
@@ -9,7 +13,7 @@ from instance import wait_for_operation
 
 def create(compute, disk_name, size, project="cidc-biofx", zone="us-east1-b"):
     """Given a XX, YYY...
-    Tries to create an disk according to the given params using 
+    Tries to create an disk according to the given params using
     googeapi methods"""
 
     disk_config = {'name': "", "sizeGb": "", "zone": ""}
@@ -20,6 +24,29 @@ def create(compute, disk_name, size, project="cidc-biofx", zone="us-east1-b"):
     disk_config['zone'] = zone
     #print(disk_config)
 
+    #create disk
+    operation = compute.disks().insert(
+        project=project,
+        zone=zone,
+        body=disk_config).execute()
+    wait_for_operation(compute, project, zone, operation['name'])
+    #print(operation)
+    return operation
+
+def createFromSnapshot(compute, disk_name, snapshotName, project="cidc-biofx", zone="us-east1-b"):
+    """Given a disk_name and a name of a valid snapshot
+    Tries to create an disk according to the given params using
+    googeapi methods"""
+    #First look up snapshot to get snapshotId
+    operation = compute.snapshots().get(
+        project=project,
+        snapshot=snapshotName).execute()
+    #print(operation)
+    snapshotId = operation['selfLink']
+
+    #Then create disk based on snapshotId
+    disk_config = {'name': disk_name, 'sourceSnapshot': snapshotId,
+                   "zone": zone}
     #create disk
     operation = compute.disks().insert(
         project=project,
@@ -93,7 +120,7 @@ def detach_disk(compute, instance_name, disk_name, project="cidc-biofx", zone="u
     # wait_for_operation(compute, project, zone, operation['name'])
     # #print(operation)
     # return operation
-    
+
 def main():
     compute = googleapiclient.discovery.build('compute', 'v1')
     #TODO: update this!
@@ -123,9 +150,9 @@ def main():
 
 
     if options.create:
-        response = create(compute, options.disk_name, options.size, 
+        response = create(compute, options.disk_name, options.size,
                           options.project, options.zone)
-        #NOTE: the instance link would be "response['targetLink']" or 
+        #NOTE: the instance link would be "response['targetLink']" or
         print(response['targetId'], response['targetLink'])
 
     if options.delete:

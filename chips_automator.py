@@ -1,10 +1,15 @@
 #!/usr/bin/env python
+"""Len Taing 2019 (TGBTG)
+CHIPS automator script to automatically run chips on GCP
+"""
+
 import os
 import sys
 import time
+import string
+import random
 import subprocess
 from optparse import OptionParser
-from string import Template
 
 import googleapiclient.discovery
 
@@ -49,15 +54,40 @@ class ssh:
             t[2].close()
             return (status, std_out, std_err)
 
+def checkConfig_bucketPath(a_dict, invalid_bucket_paths):
+    """Given a dictionary of {key: [list of google bucket paths], ...}
+    OR a dictionary of dictionaries (of google paths {key: {foo: path, ..}..}
+    Will check each of the bucket paths associated with the key and
+    if any are invalid, will add them to the invalid_bucket_path list
+    NOTE: this was an inner loop in checkConfig which we're trying to reuse"""
+
+    for sample in a_dict:
+        for f in a_dict[sample]:
+            if isinstance(a_dict[sample], list):
+                ffile = f
+            else: #dictionary
+                ffile = a_dict[sample][f]
+
+            cmd = [ "gsutil", "ls", ffile]
+            print(" ".join(cmd))
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
+            (out, error) = proc.communicate()
+            if proc.returncode != 0:
+                #print("Error %s:" % proc.returncode)
+                #print(out)
+                print(error)
+                invalid_bucket_paths.append(f)
+
 def checkConfig(chips_auto_config):
     """Does some basic checks on the config file
     INPUT config file parsed as a dictionary
     returns True if everything is ok
     otherwise exits!
     """
-    required_fields = ["instance_name", "cores", "disk_size", 
+    required_fields = ["instance_name", "cores", "disk_size",
                        "google_bucket_path", "samples", "metasheet"]
-    optional_fields = ['chips_commit']
+    #optional_fields = ['chips_commit'] #not used below!!
 
     missing = []
     for f in required_fields:
@@ -72,7 +102,7 @@ def checkConfig(chips_auto_config):
         for f in samples[sample]:
             cmd = [ "gsutil", "ls", f]
             print(" ".join(cmd))
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, 
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE)
             (out, error) = proc.communicate()
             if proc.returncode != 0:
@@ -87,7 +117,7 @@ def checkConfig(chips_auto_config):
             print(f)
         sys.exit()
 
-    #NOTE: can add additional checks like google_bucket_path is in the form
+    #NOTE: can add additional checks like google_bucket_path is in0 the form
     #of 'gs://...' etc.  but this is a start
 
     if missing:
@@ -96,33 +126,42 @@ def checkConfig(chips_auto_config):
     else:
         return True
 
-def createInstanceDisk(compute, instance_config, disk_config, ssh_config, project, zone, disk_auto_del=True):
+def createInstanceDisk(compute, instance_config, chips_ref_snapshot, disk_config, ssh_config, project, zone, disk_auto_del=True):
     #create a new instance
     print("Creating instance...")
-    response = instance.create(compute, instance_config['name'], 
-                               instance_config['image'], 
+    response = instance.create(compute, instance_config['name'],
+                               instance_config['image_name'],
+                               instance_config['image_family'],
                                instance_config['machine_type'],
                                project,
-                               instance_config['serviceAcct'], 
+                               instance_config['serviceAcct'],
                                zone)
     instanceLink = response['targetLink']
     instanceId = response['targetId']
     print(instanceLink, instanceId)
     #try to get the instance ip address
     ip_addr = instance.get_instance_ip(compute, instanceId, project, zone)
-    
+
     #create a new disk
     print("Creating disk...")
-    response = disk.create(compute, disk_config['name'], disk_config['size'], 
-                           project, zone)
+    print(disk_config)
+    response = disk.create(compute, disk_config['name'], disk_config['size'], project, zone)
     #print(response)
 
     #attach disk to instance
     print("Attaching disk...")
-    response = disk.attach_disk(compute, instance_config['name'], 
-                                disk_config['name'], project, zone)
+    response = disk.attach_disk(compute, instance_config['name'], disk_config['name'], project, zone)
     #print(response)
 
+    #CREATE REF DISK from snapshot given
+    print("Creating reference disk...")
+    ref_disk_name = "-".join([instance_config['name'], 'ref-disk'])
+    response = disk.createFromSnapshot(compute, ref_disk_name, chips_ref_snapshot, project, zone)
+    #print(response)
+
+    #attach disk to instance
+    print("Attaching reference disk...")
+    response = disk.attach_disk(compute, instance_config['name'], ref_disk_name, project, zone)
 
     #try to establish ssh connection:
     # wait 30 secs
@@ -132,7 +171,7 @@ def createInstanceDisk(compute, instance_config, disk_config, ssh_config, projec
     #TEST connection
     #(status, stdin, stderr) = connection.sendCommand("ls /mnt")
 
-    #SET the auto-delete flag for the newly created disk
+    #SET the auto-delete flag for the newly created disks
     print("Setting disk auto-delete flag for disk %s" % disk_config['name'])
     #NOTE: using the instance.set_disk_auto_delete fn doesn't work
     #TRY manual call
@@ -146,43 +185,108 @@ def createInstanceDisk(compute, instance_config, disk_config, ssh_config, projec
         #print(out)
         print(error)
 
+    #NOTE: ref disk is sdc which is peristent-disk-2
+    cmd = [ "gcloud", "compute", "instances", "set-disk-auto-delete", instance_config['name'], "--device-name", "persistent-disk-2", "--zone", zone]
+    print(" ".join(cmd))
+    proc = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    (out, error) = proc.communicate()
+    if proc.returncode != 0:
+        print("Error %s:" % proc.returncode)
+        #print(out)
+        print(error)
+
     return (instanceId, ip_addr, connection)
 
-def transferRawFiles_local(samples, ssh_conn):
-    """Goes through each FILE associated with each sample and issues
-    a cmd from the instance to download the file to /mnt/ssd/chips/data
-
-    RETIRNS: a dictionary of samples with their new data paths
+#NOTE: lots of redundancy betwwen this and the local version, but for now
+#saving a complete working copy
+def transferRawFiles_remote(samples, bucket_path):
+    """Transfers the samples from their source location to the chips project
+    location (a google bucket)
+    RETIRNS: a dictionary of samples with their new data paths (which are
+    relative to the chips project location i.e. google bucket path
     """
-
+    # PUT the files in {bucket_path}/data
+    # and build up new sample dictionary (tmp)
     tmp = {}
     for sample in samples:
         for fq in samples[sample]:
             #add this to the samples dictionary
             if sample not in tmp:
                 tmp[sample] = []
-            # get the filename, e.g. XXX.fq.gz or XXX.bsm
+            # get the filename, e.g. XXX.fq.gz
             filename = fq.split("/")[-1]
             tmp[sample].append("data/%s" % filename)
 
+            if bucket_path.endswith("/"):
+                dst = "%sdata/" % bucket_path
+            else:
+                dst = "%s/data/" % bucket_path
+
+            cmd = [ "gsutil", "-m", "cp", fq, dst]
+            print(" ".join(cmd))
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
+            (out, error) = proc.communicate()
+            if proc.returncode != 0:
+                print("Error %s:" % proc.returncode)
+                #print(out)
+                print(error)
+    return tmp
+
+def transferRawFiles_local(samples, ssh_conn, sub_dir, chips_dir='/mnt/ssd/chips'):
+    """Goes through each FILE associated with each sample and issues
+    a cmd from the instance to download the file to /mnt/ssd/chips/data
+
+    RETURNS: a dictionary of samples with their new data paths
+
+    NOTE: This function handles two types of data structures
+    1. dictionary of lists: e.g. 'samples'-
+       {sample: [google bucket file paths, ...], ...}
+    2. dictionary of dictionaries which define google bucket paths, eg. 'rna'-
+       {sample: {bam_file: <google bucket path>, expression_file: <path>}...}
+    """
+
+    tmp = {}
+    for sample in samples:
+        for fq in samples[sample]:
+            #Check if this is dictionary of lists or dict of dicts
+            if isinstance(samples[sample], list): #is a list
+                #add this to the samples dictionary
+                if sample not in tmp:
+                    tmp[sample] = []
+
+                # get the filename, e.g. XXX.fq.gz or XXX.bsm
+                ffile = fq
+                filename = ffile.split("/")[-1]
+                tmp[sample].append(os.path.join(sub_dir, sample, filename))
+            else: #dictionary
+                #add this to the samples dictionary
+                if sample not in tmp:
+                    tmp[sample] = {}
+
+                ffile = samples[sample][fq] #de-reference once more
+                filename = ffile.split("/")[-1]
+                #MAKE sure that the data structure remains a dictionary
+                tmp[sample][fq] = os.path.join(sub_dir, sample, filename)
+
+
             #HARDCODED location of where the data files are expected--
             #no trailing /
-            dst = "/mnt/ssd/chips/data"
+            #dst = "/mnt/ssd/chips/data"
+            dst = os.path.join(chips_dir, sub_dir, sample)
 
             #MAKE the data directory
             (status, stdin, stderr) = ssh_conn.sendCommand("mkdir -p %s" % dst)
-            #Can't get gsutil to work, trying to hard-code the full path
-            #cmd = " ".join([ "gsutil", "-m", "cp", fq, dst]) 
-            cmd = " ".join([ "/snap/bin/gsutil", "-m", "cp", fq, dst])
+            cmd = " ".join([ "gsutil", "-m", "cp", ffile, dst])
             print(cmd)
             (status, stdin, stderr) = ssh_conn.sendCommand(cmd)
             if stderr:
                 print(stderr)
-            
+
     return tmp
 
 def main():
-    usage = "USAGE: %prog -c [chips_automator config yaml] -u [google account username, e.g. taing] -k [google account key path, i.e. ~/.ssh/google_cloud_enging"
+    usage = "USAGE: %prog -c [chips_automator config yaml] -u [google account username, e.g. taing] -k [google account key path, i.e. ~/.ssh/google_cloud_engine"
     optparser = OptionParser(usage=usage)
     optparser.add_option("-c", "--config", help="instance name")
     optparser.add_option("-u", "--user", help="username")
@@ -208,19 +312,24 @@ def main():
     checkConfig(config)
 
     #SET DEFAULTS
-    _commit_str = "" if not "chips_commit" in config else config['chips_commit']
-    _image = "chips" if not "image" in config else config['image']
-    _project = "cidc-biofx" if not "project" in config else config['project']
+    _sentieon = config.get("sentieon", "/home/taing/sentieon/sentieon-genomics-201808.05/bin/sentieon")
+    _commit_str = config.get('chips_commit', "")
+    _image_name = config.get('image', 'chips-ver1-7a')
+    _image_family = config.get('image_family', 'chips')
+    _genes_to_plot = config.get('genes_to_plot', 'GAPDH ACTB TP53')
+    _upstream = config.get('upstream', '50000')
+    _downstream = config.get('downstream', '50000')
+    _project = config.get("project", "cidc-biofx")
     _service_account = "biofxvm@cidc-biofx.iam.gserviceaccount.com"
-    _zone = "us-east1-b" if not "zone" in config else config['zone']
+    _zone = config.get("zone", "us-east1-b")
     #dictionary of machine types based on cores
-    _machine_types = {'2': 'n1-highmem-2',
-                      '4': 'n1-highmem-4',
-                      '8': 'n1-highmem-8',
-                      '16': 'n1-highmem-16',
-                      '32': 'n1-highmem-32',
-                      '64': 'n1-highmem-64',
-                      '96': 'n1-highmem-96'}
+    _machine_types = {'2': 'n2-standard-2',
+                      '4': 'n2-standard-4',
+                      '8': 'n2-standard-8',
+                      '16': 'n2-standard-16',
+                      '32': 'n2-standard-32',
+                      '64': 'n2-standard-64',
+                      '96': 'n2-standard-96'}
 
     #SHOULD I error check these?
     #AUTO append "chips_auto_" to instance name
@@ -229,8 +338,8 @@ def main():
     disk_name = "-".join([instance_name, 'disk'])
     disk_size = config['disk_size']
 
-    #SET machine type (default to n1-standard-8 if the core count is undefined
-    machine_type = "n1-standard-8"
+    #SET machine type (default to n2-standard-8 if the core count is undefined)
+    machine_type = "n2-standard-8"
     if 'cores' in config and str(config['cores']) in _machine_types:
         machine_type = _machine_types[str(config['cores'])]
 
@@ -239,26 +348,31 @@ def main():
     google_bucket_path = config['google_bucket_path']
     normal_bucket_path = google_bucket_path.replace("gs://","") #remove gsL//
 
-    instance_config= {'name': instance_name, 
-                      'image': _image, 
-                      'machine_type': machine_type, 
+    instance_config= {'name': instance_name,
+                      'image_name': _image_name,
+                      'image_family': _image_family,
+                      'machine_type': machine_type,
                       'serviceAcct': _service_account}
 
-    disk_config= {'name': disk_name, 
+    disk_config= {'name': disk_name,
                   'size': disk_size}
 
-    ssh_config= {'user': options.user, 
+    chips_ref_snapshot = config.get('chips_ref_snapshot', 'chips-ref-ver1-0')
+
+    ssh_config= {'user': options.user,
                  'key': options.key_file}
 
-    #print(instance_config)
-    #print(disk_config)
+
+    print(instance_config)
+    print(disk_config)
     #print(ssh_config)
     compute = googleapiclient.discovery.build('compute', 'v1')
-    (instanceId, ip_addr, ssh_conn) = createInstanceDisk(compute, 
-                                                         instance_config, 
-                                                         disk_config, 
-                                                         ssh_config, 
-                                                         _project, 
+    (instanceId, ip_addr, ssh_conn) = createInstanceDisk(compute,
+                                                         instance_config,
+                                                         chips_ref_snapshot,
+                                                         disk_config,
+                                                         ssh_config,
+                                                         _project,
                                                          _zone)
 
     print("Successfully created instance %s" % instance_config['name'])
@@ -266,27 +380,36 @@ def main():
 #------------------------------------------------------------------------------
     #SETUP the instance, disk, and chips directory
     print("Setting up the attached disk...")
-    (status, stdin, stderr) = ssh_conn.sendCommand("/home/taing/utils/chips_automator.sh %s %s" % (options.user, _commit_str))
+    cmd= "/home/taing/utils/chips_automator.sh %s %s" % (options.user, _commit_str)
+    #print(cmd)
+    (status, stdin, stderr) = ssh_conn.sendCommand(cmd)
     if stderr:
         print(stderr)
 #------------------------------------------------------------------------------
     # transfer the data to the bucket directory
-    print("Transferring raw files to the bucket...")
-    tmp = transferRawFiles_local(config['samples'], ssh_conn)
+    print("Transferring raw files from the bucket...")
+    samples = transferRawFiles_local(config['samples'], ssh_conn, 'data')
+
+
 #------------------------------------------------------------------------------
     # Write a config (.config.yaml) and a meta (.metasheet.csv) locally
     # then upload it to the instance
     # CONFIG.yaml
     print("Setting up the config.yaml...")
-    # parse the chips.config.yaml template
+    # parse the chips_config.yaml template
     #NOTE: using the local version of the config
     chips_config_f = open('chips.config.yaml')
     chips_config = ruamel.yaml.round_trip_load(chips_config_f.read())
     chips_config_f.close()
-    
-    # SET the config to the samples dictionary we built up
-    chips_config['samples'] = tmp
 
+    # SET the config to the samples dictionary we built up
+    chips_config['samples'] = samples
+
+    chips_config['genes_to_plot'] = _genes_to_plot
+    chips_config['upstream'] = _upstream
+    chips_config['downstream'] = _downstream
+    # Add sentieon path
+    chips_config['sentieon'] = _sentieon
     ##set transfer path
     transfer_path = normal_bucket_path
     #check if transfer_path has gs:// in front
@@ -300,27 +423,41 @@ def main():
     ##print(chips_config)
 
     #WRITE this to hidden file .config.yaml
-    print("Setting up the metasheet...")
-    out = open(".config.yaml","w")
+    print("Setting up the config and metasheet...")
+    #prepend a random string to these files
+    salt=''.join(random.choice(string.ascii_lowercase) for i in range(6))
+    print("writing %s" % (".config.%s.yaml" % salt))
+    out = open(".config.%s.yaml" % salt,"w")
     #NOTE: this writes the comments for the metasheet as well, but ignore it
     ruamel.yaml.round_trip_dump(chips_config, out)
     out.close()
 
     # METASHEET.csv
     # write the metasheet to .metasheet.csv
-    out = open(".metasheet.csv","w")
-    out.write("RunName,Treat1,Cont1,Treat2,Cont2\n") #NOTE: IGNORING Treat2,Cont2 cols!
+    print("writing %s" % (".metasheet.%s.csv" % salt))
+    out = open(".metasheet.%s.csv" % salt,"w")
+    out.write("RunName,Treat1,Cont1,Treat2,Cont2\n")
     for run in config['metasheet']:
-        treat = config['metasheet'][run]['treat']
-        cont = config['metasheet'][run]['cont']
-        out.write("%s\n" % ','.join([run, treat, cont, "",""]))
+          treat1 = config['metasheet'][run]['treat1']
+          cont1 = config['metasheet'][run]['cont1']
+          treat2 = config['metasheet'][run]['treat2']
+          cont2 = config['metasheet'][run]['cont2']
+          ls = [run, treat1, cont1,treat2, cont2]
+          res = [str(i or '') for i in ls]
+          out.write("%s\n" % ','.join(res))
     out.close()
 #------------------------------------------------------------------------------
     #UPLOAD .config.yaml and .metasheet.csv
     #NOTE: we are skip checking .ssh/known_hosts
     #really should make this a fn
-    for f in ['config.yaml', 'metasheet.csv']:
-        cmd = ['scp', "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", '-i', options.key_file, ".%s" % f, "%s@%s:%s%s" % (options.user, ip_addr, "/mnt/ssd/chips/", f)]
+
+    #upload chips automator config file as well
+    chips_auto_config_f = options.config.split("/")[-1] #Take out config fname
+    for f in [('config.yaml', ".config.%s.yaml" % salt),
+              ('metasheet.csv', ".metasheet.%s.csv" % salt),
+              (chips_auto_config_f, options.config)]:
+        (basename, fname) = f
+        cmd = ['scp', "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", '-i', options.key_file, "%s" % fname, "%s@%s:%s%s" % (options.user, ip_addr, "/mnt/ssd/chips/", basename)]
         print(" ".join(cmd))
         proc = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         (out, error) = proc.communicate()
@@ -337,5 +474,6 @@ def main():
 
     print("The instance is running at the following IP: %s" % ip_addr)
     print("please log into this instance and to check-in on the run")
+
 if __name__=='__main__':
     main()

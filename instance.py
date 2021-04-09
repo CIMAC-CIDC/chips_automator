@@ -1,3 +1,7 @@
+"""Len Taing 2019 (TGBTG)
+CHIPS automator - Google Cloud API wrapper for instance operations
+"""
+
 import os
 import sys
 import time
@@ -11,7 +15,7 @@ import googleapiclient.discovery
 config = {
     'name': "", #to be set
     'machineType': None, #to be set
-    
+
     # Specify the boot disk and the image to use as a source.
     'disks': [
         {
@@ -22,7 +26,7 @@ config = {
             }
         }
     ],
-    
+
     # Specify a network interface with NAT to access the public
     # internet.
     'networkInterfaces': [{
@@ -65,14 +69,25 @@ def wait_for_operation(compute, project, zone, operation):
 
         time.sleep(1)
 
-def create(compute, instance_name, image, machine_type, project, serviceAcct, zone):
+def create(compute, instance_name, image_name, image_family, machine_type, project, serviceAcct, zone):
     """Given a XX, YYY...
-    Tries to create an instance according to the given params using 
-    googeapi methods"""
-
-    #get latest image from image family
-    image_response = compute.images().getFromFamily(project=project, 
-                                                    family=image).execute()
+    Tries to create an instance according to the given params using
+    googeapi methods
+    NOTE: Either image_name or image_family is filled (i.e. both being
+    empty strings are not allowed!)
+    If both are specified, the image_name is used where this fn
+    tries to retrieve that image, otherwise tries to use the
+    latest image from the image_family, e.g. 'wes' or 'cidc_chips'
+    """
+    #KEY: WE need to check if image_name is non-empty--if so, we try to
+    #retrieve the image ELSE (we assume image_family is non-empty) and
+    #get the latest image from the family name
+    if image_name:
+        image_response = compute.images().get(project=project,
+                                              image=image_name).execute()
+    else:
+        image_response = compute.images().getFromFamily(project=project,
+                                                        family=image_family).execute()
     source_disk_image = image_response['selfLink']
 
     #set the machine type
@@ -122,7 +137,7 @@ def get_instance_from_name(compute, machine_name, project, zone):
         if r['name'] == machine_name:
             instance = r
     return instance
-    
+
 def get_instance_ip(compute, instance_id, project, zone):
     result = get_instance(compute, instance_id, project, zone)
     ip_addr = result['networkInterfaces'][0]['accessConfigs'][0]['natIP']
@@ -143,7 +158,7 @@ def get_disk_device_name(compute, instance_id, project, zone, disk_name):
             return d['deviceName']
     return None
 
-#WARNING: THE FN below DOES NOT ACTUAKKY work--the call is correct but the 
+#WARNING: THE FN below DOES NOT ACTUAKKY work--the call is correct but the
 # google api is broken!
 def set_disk_auto_delete(compute, instance_name, project, zone, disk_dev_name, auto_del_flag=True):
     """GIVEN a compute resource, an instance_name, project, zone,
@@ -182,10 +197,10 @@ def main():
 
 
     if options.create:
-        response = create(compute, options.instance_name, options.image, 
-                          options.machine_type, options.project, 
+        response = create(compute, options.instance_name, options.image,
+                          options.machine_type, options.project,
                           options.service_account, options.zone)
-        #NOTE: the instance link would be "response['targetLink']" or 
+        #NOTE: the instance link would be "response['targetLink']" or
         print(response['targetId'], response['targetLink'])
 
     if options.delete:
