@@ -472,7 +472,7 @@ def main():
     if stderr:
         print(stderr)
 
-    print("The instance is running at the following IP: %s" % ip_addr)
+    print("The instance %s is running at the following IP: %s" % (instance_name, ip_addr))
     print("please log into this instance and to check-in on the run")
 
 if __name__=='__main__':
