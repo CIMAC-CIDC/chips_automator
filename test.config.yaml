@@ -28,12 +28,12 @@ google_bucket_path: gs://lens_bucket2/chips_automator/raw_data/test_set1/Results
 # chips_commit: develop
 
 #Define the chips reference snapshot to use, default chips-ref-ver1-0
-chips_ref_snapshot: 'chips-ref-ver1-0'
+chips_ref_snapshot: 'chips-ref-ver1-1'
 
 #Uncomment the following and define the specific chips GCP image to use
 #NOTE: IF a specific GCP image is not set via config['image'], then
 #the default behavior is to get the latest chips image
-image: 'chips-ver1-7c'
+image: 'chips-ver1-8a'
 
 #ALIGNER: if you have sentieon license and got sentieon installed on your machine
 #Uncomment the following line and set absolute path of sentieon
