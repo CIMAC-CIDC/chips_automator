@@ -33,7 +33,7 @@ chips_ref_snapshot: 'chips-ref-ver1-1'
 #Uncomment the following and define the specific chips GCP image to use
 #NOTE: IF a specific GCP image is not set via config['image'], then
 #the default behavior is to get the latest chips image
-image: 'chips-ver1-9'
+image: 'chips-ver1-10'
 
 #ALIGNER: if you have sentieon license and got sentieon installed on your machine
 #Uncomment the following line and set absolute path of sentieon
